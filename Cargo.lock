@@ -45,18 +45,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c4b4d0bd25bd0b74681c0ad21497610ce1b7c91b1022cd21c80c6fbdd9476b0"
 
 [[package]]
-name = "aws-billing-helper"
-version = "0.1.0"
-dependencies = [
- "aws-config",
- "aws-sdk-costexplorer",
- "aws-sdk-sts",
- "chrono",
- "reqwest",
- "tokio",
-]
-
-[[package]]
 name = "aws-config"
 version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -84,6 +72,18 @@ dependencies = [
  "tracing",
  "url",
  "zeroize",
+]
+
+[[package]]
+name = "aws-cost-notifier"
+version = "0.1.0"
+dependencies = [
+ "aws-config",
+ "aws-sdk-costexplorer",
+ "aws-sdk-sts",
+ "chrono",
+ "reqwest",
+ "tokio",
 ]
 
 [[package]]
