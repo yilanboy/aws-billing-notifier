@@ -1,21 +1,22 @@
-# AWS Cost Notifier
+# AWS Cost Notifier in Lambda
 
-A simple project to get the AWS cost for the month and notify the user using Telegram!
+A simple rust lambda function to get the aws cost for the month and notify the user using telegram.
 
 ## Installation
 
-Use cargo to install the dependencies.
+I use [cargo lambda](https://www.cargo-lambda.info/) to build the binary file.
+You need to install cargo lambda first.
 
 ```bash
-cargo build
+# MacOS
+brew tap cargo-lambda/cargo-lambda
+brew install cargo-lambda
 ```
 
-Run the program with environment variables `TELEGRAM_TOKEN` and `CHAT_ID`.
+Use cargo lambda to generate the binary file.
 
 ```bash
-export TELEGRAM_TOKEN="..."
-# which chat you want to send the message
-export CHAT_ID="..."
-
-cargo run
+cargo lambda build --release --output-format zip --arm64
 ```
+
+This program need two environment variables `TELEGRAM_TOKEN` and `CHAT_ID`.

@@ -1,7 +1,8 @@
-use aws_sdk_costexplorer as costexplorer;
 use aws_sdk_costexplorer::types::{DateInterval, Granularity, ResultByTime};
 use chrono::Datelike;
+use lambda_runtime::{service_fn, Error, LambdaEvent};
 use reqwest::StatusCode;
+use serde_json::Value;
 use std::collections::HashMap;
 
 async fn get_aws_account_id() -> String {
@@ -63,17 +64,15 @@ async fn get_aws_cost_in_this_month() -> Vec<ResultByTime> {
 }
 
 
-async fn send_telegram_message(message: &str) -> Result<(), reqwest::Error> {
-    let telegram_token: String = std::env::var("TELEGRAM_TOKEN")
-        .expect("A TELEGRAM_TOKEN must be set in this app's Lambda environment variables.");
-
-    let chat_id: String = std::env::var("CHAT_ID")
-        .expect("A CHAT_ID must be set in this app's Lambda environment variables.");
-
+async fn send_telegram_message(
+    telegram_token: &str,
+    chat_id: &str,
+    message: &str,
+) -> Result<(), reqwest::Error> {
     let url: String = format!("https://api.telegram.org/bot{telegram_token}/sendMessage");
 
     let mut params: HashMap<&str, &str> = HashMap::new();
-    params.insert("chat_id", chat_id.as_str());
+    params.insert("chat_id", chat_id);
     params.insert("parse_mode", "MarkdownV2");
     params.insert("text", message);
 
@@ -95,8 +94,7 @@ async fn send_telegram_message(message: &str) -> Result<(), reqwest::Error> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), costexplorer::Error> {
+async fn handler(telegram_token: &str, chat_id: &str, _event: LambdaEvent<Value>) -> Result<(), Error> {
     let account_id = get_aws_account_id().await;
 
     let results = get_aws_cost_in_this_month().await;
@@ -122,14 +120,29 @@ async fn main() -> Result<(), costexplorer::Error> {
 
             let unit = value.unit().unwrap_or_else(|| "USD");
 
-            send_telegram_message(format!(r#"
+            let message = format!(r#"
 Your AWS Account __{account_id}__
-The cost in this month is: __{}__ {}
-            "#, amount, unit).as_str())
+The cost in this month is: __{amount}__ {unit}
+            "#);
+
+            send_telegram_message(telegram_token, chat_id, &message)
                 .await
                 .expect("There was a error sending telegram message.");
         }
     }
 
     Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    let telegram_token: String = std::env::var("TELEGRAM_TOKEN")
+        .expect("A TELEGRAM_TOKEN must be set in this app's Lambda environment variables.");
+
+    let chat_id: String = std::env::var("CHAT_ID")
+        .expect("A CHAT_ID must be set in this app's Lambda environment variables.");
+
+    lambda_runtime::run(service_fn(|event: LambdaEvent<Value>| async {
+        handler(&telegram_token, &chat_id, event).await
+    })).await
 }
