@@ -94,7 +94,11 @@ async fn send_telegram_message(
     Ok(())
 }
 
-async fn handler(telegram_token: &str, chat_id: &str, _event: LambdaEvent<Value>) -> Result<(), Error> {
+async fn handler(
+    telegram_token: &str,
+    chat_id: &str,
+    _event: LambdaEvent<Value>,
+) -> Result<(), Error> {
     let account_id = get_aws_account_id().await;
 
     let results = get_aws_cost_in_this_month().await;
