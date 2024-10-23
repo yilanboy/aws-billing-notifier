@@ -17,12 +17,12 @@ impl Telegram {
     }
 
     pub async fn send_message(&self) -> Result<(), reqwest::Error> {
-        let url: String = format!("https://api.telegram.org/bot{0}/sendMessage", self.telegram_token);
+        let url: String = format!("https://api.telegram.org/bot{0}/sendMessage", self.telegram_token.as_str());
 
         let mut params: HashMap<&str, &str> = HashMap::new();
-        params.insert("chat_id", &*self.chat_id);
+        params.insert("chat_id", self.chat_id.as_str());
         params.insert("parse_mode", "MarkdownV2");
-        params.insert("text", &*self.message);
+        params.insert("text", self.message.as_str());
 
         let url = reqwest::Url::parse_with_params(&url, &params);
 
