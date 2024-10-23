@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aws-config = { version = "1.5.5", features = ["behavior-version-latest"] }
-aws-sdk-costexplorer = "1.40.0"
+aws-config = { version = "1.5.8", features = ["behavior-version-latest"] }
+aws-sdk-costexplorer = "1.49.0"
 lambda_runtime = "0.13.0"
-reqwest = { version = "0.12.5", features = ["native-tls-vendored"] }
-tokio = { version = "1.39.2", features = ["full"] }
+reqwest = { version = "0.12.8", features = ["native-tls-vendored"] }
+tokio = { version = "1.41.0", features = ["full"] }
 chrono = "0.4.38"
-aws-sdk-sts = "1.38.0"
-serde_json = "1.0.125"
+aws-sdk-sts = "1.46.0"
+serde_json = "1.0.132"
