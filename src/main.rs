@@ -1,9 +1,8 @@
-use chrono::Datelike;
 use lambda_runtime::{service_fn, Error, LambdaEvent};
 use serde_json::Value;
 
-mod telegram;
 mod aws;
+mod telegram;
 
 async fn handler(
     telegram_token: &str,
@@ -37,10 +36,8 @@ async fn handler(
 
             let unit = value.unit().unwrap_or_else(|| "USD");
 
-            let message = format!(r#"
-Your AWS Account __{account_id}__
-The cost in this month is: __{amount}__ {unit}
-            "#);
+            let mut message = format!("Your AWS Account __{account_id}__\n");
+            message.push_str(format!("The cost in this month is: __{amount}__ {unit}").as_str());
 
             let telegram = telegram::Telegram::new(
                 telegram_token.to_string(),
@@ -48,10 +45,52 @@ The cost in this month is: __{amount}__ {unit}
                 message.to_string(),
             );
 
-            telegram.send_message()
+            telegram
+                .send_message()
                 .await
                 .expect("There was a error sending telegram message.");
         }
+    }
+
+    let results = aws.get_cost_by_service().await;
+
+    for result in results {
+        // declare a vector that contains string
+        let mut message = String::new();
+
+        for group in result.groups() {
+            let service = group.keys().first().unwrap();
+
+            let metrics = group.metrics().unwrap();
+
+            if let Some(value) = metrics.get("UnblendedCost") {
+                let amount = match value.amount() {
+                    Some(amount) => {
+                        let float_value: f64 = amount.parse().expect("Invalid float string");
+                        let rounded_value = (float_value * 100.0).round() / 100.0;
+                        let rounded_str = format!("{:.2}", rounded_value);
+
+                        rounded_str.replace(".", "\\.")
+                    }
+                    None => panic!("There was a error getting the total amount"),
+                };
+
+                let unit = value.unit().unwrap_or_else(|| "USD");
+
+                message.push_str(format!("{service}: __{amount}__ {unit}\n").as_str());
+            }
+        }
+
+        let telegram = telegram::Telegram::new(
+            telegram_token.to_string(),
+            chat_id.to_string(),
+            message.to_string(),
+        );
+
+        telegram
+            .send_message()
+            .await
+            .expect("There was a error sending telegram message.");
     }
 
     Ok(())
@@ -67,5 +106,6 @@ async fn main() -> Result<(), Error> {
 
     lambda_runtime::run(service_fn(|event: LambdaEvent<Value>| async {
         handler(&telegram_token, &chat_id, event).await
-    })).await
+    }))
+    .await
 }
