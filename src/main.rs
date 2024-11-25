@@ -13,6 +13,7 @@ fn format_amount(amount: &str) -> Result<String, Error> {
         .parse()
         .map_err(|e| Error::from(format!("Invalid float string: {}", e)))?;
     let rounded_value = (float_value * 100.0).round() / 100.0;
+
     Ok(format!("{:.2}", rounded_value).replace(".", "\\."))
 }
 
@@ -39,6 +40,7 @@ async fn send_total_cost(aws: &aws::Aws, telegram: &telegram::Telegram) -> Resul
             telegram.send(message).await?;
         }
     }
+
     Ok(())
 }
 
@@ -65,12 +67,15 @@ async fn send_service_costs(aws: &aws::Aws, telegram: &telegram::Telegram) -> Re
                 let formatted_amount = format_amount(&amount)?;
                 let unit = value.unit().unwrap_or(DEFAULT_CURRENCY);
 
-                message.push_str(&format!("{service}: __{formatted_amount}__ {unit}\n"));
+                if formatted_amount.as_str() != "0\\.00" {
+                    message.push_str(&format!("{service}: __{formatted_amount}__ {unit}\n"));
+                }
             }
         }
 
         telegram.send(message).await?;
     }
+
     Ok(())
 }
 
