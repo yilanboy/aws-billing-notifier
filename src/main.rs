@@ -4,9 +4,6 @@ use serde_json::Value;
 mod aws;
 mod telegram;
 
-const UNBLENDED_COST_KEY: &str = "UnblendedCost";
-const DEFAULT_CURRENCY: &str = "USD";
-
 // Helper function for amount formatting
 fn format_amount(amount: &str) -> Result<String, Error> {
     let float_value: f64 = amount
@@ -14,42 +11,25 @@ fn format_amount(amount: &str) -> Result<String, Error> {
         .map_err(|e| Error::from(format!("Invalid float string: {}", e)))?;
     let rounded_value = (float_value * 100.0).round() / 100.0;
 
-    Ok(format!("{:.2}", rounded_value).replace(".", "\\."))
+    Ok(format!("{:.2}", rounded_value))
 }
 
-async fn send_total_cost(aws: &aws::Aws, telegram: &telegram::Telegram) -> Result<(), Error> {
-    let account_id = aws.get_account_id().await;
-    let results = aws.get_account_cost_in_this_month().await;
-
-    for result in results {
-        if let Some(total) = result.total() {
-            let value = total
-                .get(UNBLENDED_COST_KEY)
-                .ok_or_else(|| Error::from("Error getting unblended cost"))?;
-
-            let amount = value
-                .amount()
-                .ok_or_else(|| Error::from("Error getting total amount"))?;
-            let formatted_amount = format_amount(&amount)?;
-            let unit = value.unit().unwrap_or(DEFAULT_CURRENCY);
-
-            let message = format!(
-                "Your AWS Account __{account_id}__\nThe cost in this month is: __{formatted_amount}__ {unit}"
-            );
-
-            telegram.send(message).await?;
-        }
-    }
-
-    Ok(())
+fn escape_markdown(text: &str) -> String {
+    text.replace("-", "\\-").replace(".", "\\.")
 }
 
 async fn send_service_costs(aws: &aws::Aws, telegram: &telegram::Telegram) -> Result<(), Error> {
+    let account_id = aws.get_account_id().await;
+    let mut total_amount: f64 = 0.0;
+    let mut message = String::new();
+
+    message.push_str(&format!(
+        "Your AWS Account __{account_id}__ costs in this month\n\n"
+    ));
+
     let results = aws.get_cost_by_service().await;
 
     for result in results {
-        let mut message = String::new();
-
         for group in result.groups() {
             let service = group
                 .keys()
@@ -60,21 +40,24 @@ async fn send_service_costs(aws: &aws::Aws, telegram: &telegram::Telegram) -> Re
                 .metrics()
                 .ok_or_else(|| Error::from("No metrics found"))?;
 
-            if let Some(value) = metrics.get(UNBLENDED_COST_KEY) {
+            if let Some(value) = metrics.get("UnblendedCost") {
                 let amount = value
                     .amount()
                     .ok_or_else(|| Error::from("Error getting amount"))?;
                 let formatted_amount = format_amount(&amount)?;
-                let unit = value.unit().unwrap_or(DEFAULT_CURRENCY);
+                let unit = value.unit().unwrap();
 
-                if formatted_amount.as_str() != "0\\.00" {
+                if formatted_amount.as_str() != "0.00" {
+                    total_amount += formatted_amount.parse::<f64>().unwrap();
                     message.push_str(&format!("{service}: __{formatted_amount}__ {unit}\n"));
                 }
             }
         }
-
-        telegram.send(message).await?;
     }
+
+    message.push_str(&format!("\nTotal: __{:.2}__", total_amount));
+
+    telegram.send(escape_markdown(message.as_str())).await?;
 
     Ok(())
 }
@@ -87,7 +70,6 @@ async fn handler(
     let aws = aws::Aws::new();
     let telegram = telegram::Telegram::new(telegram_token.to_string(), chat_id.to_string());
 
-    send_total_cost(&aws, &telegram).await?;
     send_service_costs(&aws, &telegram).await?;
 
     Ok(())

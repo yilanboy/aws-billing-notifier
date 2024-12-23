@@ -31,49 +31,6 @@ impl Aws {
         }
     }
 
-    pub async fn get_account_cost_in_this_month(&self) -> Vec<ResultByTime> {
-        let config = aws_config::load_from_env().await;
-        let client = aws_sdk_costexplorer::Client::new(&config);
-
-        let now = chrono::Utc::now().naive_utc();
-        let start_of_month = now.with_day(1).unwrap();
-
-        let start_date = start_of_month.format("%Y-%m-%d").to_string();
-        let end_date = now.format("%Y-%m-%d").to_string();
-
-        let date_interval = DateInterval::builder()
-            .start(start_date)
-            .end(end_date)
-            .build()
-            .unwrap_or_else(|error| {
-                panic!(
-                    "Tried to create date interval but there was a problem: {:?}",
-                    error
-                );
-            });
-
-        let response = client
-            .get_cost_and_usage()
-            .time_period(date_interval)
-            .metrics("UnblendedCost")
-            .granularity(Granularity::Monthly)
-            .send()
-            .await;
-
-        let response = match response {
-            Ok(response) => response,
-            Err(error) => panic!("There was a error getting the cost and usage: {:?}", error),
-        };
-
-        let mut result_by_time: Vec<ResultByTime> = Vec::new();
-
-        for result in response.results_by_time() {
-            result_by_time.push(result.clone());
-        }
-
-        result_by_time
-    }
-
     pub async fn get_cost_by_service(&self) -> Vec<ResultByTime> {
         let config = aws_config::load_from_env().await;
         let client = aws_sdk_costexplorer::Client::new(&config);
