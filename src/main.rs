@@ -5,7 +5,7 @@ mod aws;
 mod telegram;
 
 // Helper function for amount formatting
-fn format_amount(amount: &str) -> Result<String, Error> {
+fn format_amount(amount: String) -> Result<String, Error> {
     let float_value: f64 = amount
         .parse()
         .map_err(|e| Error::from(format!("Invalid float string: {}", e)))?;
@@ -14,7 +14,7 @@ fn format_amount(amount: &str) -> Result<String, Error> {
     Ok(format!("{:.2}", rounded_value))
 }
 
-fn escape_markdown(text: &str) -> String {
+fn escape_markdown(text: String) -> String {
     text.replace("-", "\\-").replace(".", "\\.")
 }
 
@@ -44,7 +44,7 @@ async fn send_service_costs(aws: &aws::Aws, telegram: &telegram::Telegram) -> Re
                 let amount = value
                     .amount()
                     .ok_or_else(|| Error::from("Error getting amount"))?;
-                let formatted_amount = format_amount(&amount)?;
+                let formatted_amount = format_amount(amount.to_string())?;
                 let unit = value.unit().unwrap();
 
                 if formatted_amount.as_str() != "0.00" {
@@ -57,7 +57,7 @@ async fn send_service_costs(aws: &aws::Aws, telegram: &telegram::Telegram) -> Re
 
     message.push_str(&format!("\nTotal: __{:.2}__", total_amount));
 
-    telegram.send(escape_markdown(message.as_str())).await?;
+    telegram.send(escape_markdown(message)).await?;
 
     Ok(())
 }
