@@ -1,5 +1,6 @@
 use lambda_runtime::{service_fn, Error, LambdaEvent};
 use serde_json::Value;
+use std::collections::HashMap;
 
 mod aws;
 mod telegram;
@@ -23,11 +24,15 @@ async fn send_service_costs(aws: &aws::Aws, telegram: &telegram::Telegram) -> Re
     let mut total_amount: f64 = 0.0;
     let mut message = String::new();
 
+    message.push_str("```text\n");
+
     message.push_str(&format!(
-        "Your AWS Account __{account_id}__ costs in this month\n\n"
+        "Your AWS Account {account_id} costs in this month\n\n"
     ));
 
     let results = aws.get_cost_by_service().await;
+
+    let mut service_cost_info_list: Vec<HashMap<String, String>> = Vec::new();
 
     for result in results {
         for group in result.groups() {
@@ -49,13 +54,60 @@ async fn send_service_costs(aws: &aws::Aws, telegram: &telegram::Telegram) -> Re
 
                 if formatted_amount.as_str() != "0.00" {
                     total_amount += formatted_amount.parse::<f64>().unwrap();
-                    message.push_str(&format!("{service}: __{formatted_amount}__ {unit}\n"));
+
+                    let mut service_cost_info = HashMap::new();
+
+                    service_cost_info.insert("service".to_string(), service.clone());
+                    service_cost_info.insert("formatted_amount".to_string(), formatted_amount);
+                    service_cost_info.insert("unit".to_string(), unit.to_string());
+
+                    service_cost_info_list.push(service_cost_info);
                 }
             }
         }
     }
 
-    message.push_str(&format!("\nTotal: __{:.2}__", total_amount));
+    service_cost_info_list.sort_by(|a, b| {
+        let service_a = a.get("service").unwrap();
+        let service_b = b.get("service").unwrap();
+
+        service_a.len().cmp(&service_b.len())
+    });
+
+    let last_element = service_cost_info_list.last().unwrap();
+    let last_element_service = last_element.get("service").unwrap();
+    let last_element_formatted_amount = last_element.get("formatted_amount").unwrap();
+    let last_element_unit = last_element.get("unit").unwrap();
+
+    let last_service_cost_info_text = String::from(format!(
+        "{last_element_service} ---- {last_element_formatted_amount} {last_element_unit}\n"
+    ));
+
+    let last_service_cost_info_text_length = last_service_cost_info_text.len();
+
+    for service_cost_info in service_cost_info_list {
+        let service = service_cost_info.get("service").unwrap();
+        let formatted_amount = service_cost_info.get("formatted_amount").unwrap();
+        let unit = service_cost_info.get("unit").unwrap();
+
+        let service_cost_info_text = String::from(format!("{service} {formatted_amount} {unit}\n"));
+
+        let service_cost_info_text_length = service_cost_info_text.len();
+
+        let char_count_difference =
+            last_service_cost_info_text_length - service_cost_info_text_length;
+
+        let line = "-".repeat(char_count_difference);
+
+        let service_cost_info_text =
+            String::from(format!("{service} {line} {formatted_amount} {unit}\n"));
+
+        message.push_str(&service_cost_info_text);
+    }
+
+    message.push_str(&format!("\nTotal: {:.2}", total_amount));
+
+    message.push_str("```");
 
     telegram.send(escape_markdown(message)).await?;
 
