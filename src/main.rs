@@ -85,6 +85,22 @@ async fn send_service_costs(aws: &aws::Aws, telegram: &telegram::Telegram) -> Re
 
     let last_service_cost_info_text_length = last_service_cost_info_text.len();
 
+    service_cost_info_list.sort_by(|a, b| {
+        let formatted_amount_a = a.get("formatted_amount").unwrap();
+        let formatted_amount_b = b.get("formatted_amount").unwrap();
+
+        let formatted_amount_a = formatted_amount_a
+            .parse::<f64>()
+            .expect("Error to convert formatted amount to f64");
+        let formatted_amount_b = formatted_amount_b
+            .parse::<f64>()
+            .expect("Error to convert formatted amount to f64");
+
+        formatted_amount_b
+            .partial_cmp(&formatted_amount_a)
+            .expect("Error to compare these two float")
+    });
+
     for service_cost_info in service_cost_info_list {
         let service = service_cost_info.get("service").unwrap();
         let formatted_amount = service_cost_info.get("formatted_amount").unwrap();
