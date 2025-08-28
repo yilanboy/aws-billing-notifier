@@ -63,13 +63,9 @@ impl Message {
     ///
     /// # Returns
     ///
-    /// * `Result<(), TelegramError>` - Ok if successful, Err otherwise
+    /// * `Result<(), TelegramError>` - Ok, if successful, Err otherwise
     pub async fn send(&self, message: String) -> Result<(), TelegramError> {
-        let url: String = format!(
-            "{}/bot{}/sendMessage",
-            self.base_url,
-            self.telegram_token
-        );
+        let url: String = format!("{}/bot{}/sendMessage", self.base_url, self.telegram_token);
 
         let mut params: HashMap<&str, &str> = HashMap::new();
         params.insert("chat_id", self.chat_id.as_str());
