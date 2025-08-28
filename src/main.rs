@@ -1,156 +1,164 @@
+use aws_billing_notifier::{aws, escape_markdown, format_amount, telegram, AppError};
 use lambda_runtime::{service_fn, Error, LambdaEvent};
 use serde_json::Value;
-use std::collections::HashMap;
 
-mod aws;
-mod telegram;
-
-// Helper function for amount formatting
-fn format_amount(amount: String) -> Result<String, Error> {
-    let float_value: f64 = amount
-        .parse()
-        .map_err(|e| Error::from(format!("Invalid float string: {}", e)))?;
-    let rounded_value = (float_value * 100.0).round() / 100.0;
-
-    Ok(format!("{:.2}", rounded_value))
+/// Service cost information
+#[derive(Clone)]
+struct ServiceCostInfo {
+    service: String,
+    amount: f64,
+    formatted_amount: String,
+    unit: String,
 }
 
-fn escape_markdown(text: String) -> String {
-    text.replace("-", "\\-").replace(".", "\\.")
-}
+// AppError already implements std::error::Error via thiserror,
+// so lambda_runtime::Error can automatically convert from it
 
-async fn send_service_costs(aws: &aws::Aws, telegram: &telegram::Telegram) -> Result<(), Error> {
-    let account_id = aws.get_account_id().await;
+/// Fetches and sends AWS service costs via Telegram
+async fn send_service_costs(
+    aws: &aws::BillExplorer,
+    message: &telegram::Message,
+) -> Result<(), AppError> {
+    // Get AWS account ID
+    let account_id = aws.get_account_id().await?;
     let mut total_amount: f64 = 0.0;
-    let mut message = String::new();
+    let mut body = String::new();
 
-    message.push_str("```text\n");
-
-    message.push_str(&format!(
+    body.push_str("```text\n");
+    body.push_str(&format!(
         "Your AWS Account {account_id} costs in this month\n\n"
     ));
 
-    let results = aws.get_cost_by_service().await;
+    // Get cost data from AWS
+    let results = aws.get_cost_by_service().await?;
+    let mut service_costs: Vec<ServiceCostInfo> = Vec::new();
 
-    let mut service_cost_info_list: Vec<HashMap<String, String>> = Vec::new();
-
+    // Process cost data
     for result in results {
         for group in result.groups() {
             let service = group
                 .keys()
                 .first()
-                .ok_or_else(|| Error::from("No service name found"))?;
+                .ok_or_else(|| AppError::DataProcessing("No service name found".to_string()))?;
+
+            let mut service_name = service.to_string();
+
+            // if the service is over than 30 characters, replace it with "..."
+            if service_name.len() > 30 {
+                service_name.truncate(30);
+                service_name.push_str("...");
+            }
 
             let metrics = group
                 .metrics()
-                .ok_or_else(|| Error::from("No metrics found"))?;
+                .ok_or_else(|| AppError::DataProcessing("No metrics found".to_string()))?;
 
             if let Some(value) = metrics.get("UnblendedCost") {
                 let amount = value
                     .amount()
-                    .ok_or_else(|| Error::from("Error getting amount"))?;
-                let formatted_amount = format_amount(amount.to_string())?;
-                let unit = value.unit().unwrap();
+                    .ok_or_else(|| AppError::DataProcessing("Error getting amount".to_string()))?;
 
-                if formatted_amount.as_str() != "0.00" {
-                    total_amount += formatted_amount.parse::<f64>().unwrap();
+                let formatted_amount = format_amount(amount)?;
+                let unit = value.unit().unwrap_or("USD");
 
-                    let mut service_cost_info = HashMap::new();
+                // Skip zero-cost services
+                if formatted_amount != "0.00" {
+                    let amount_value = formatted_amount
+                        .parse::<f64>()
+                        .map_err(|e| AppError::Parse(format!("Error parsing amount: {}", e)))?;
 
-                    service_cost_info.insert("service".to_string(), service.clone());
-                    service_cost_info.insert("formatted_amount".to_string(), formatted_amount);
-                    service_cost_info.insert("unit".to_string(), unit.to_string());
+                    total_amount += amount_value;
 
-                    service_cost_info_list.push(service_cost_info);
+                    service_costs.push(ServiceCostInfo {
+                        service: service_name,
+                        amount: amount_value,
+                        formatted_amount,
+                        unit: unit.to_string(),
+                    });
                 }
             }
         }
     }
 
-    service_cost_info_list.sort_by(|a, b| {
-        let service_a = a.get("service").unwrap();
-        let service_b = b.get("service").unwrap();
+    // Handle empty results
+    if service_costs.is_empty() {
+        body.push_str("No costs found for this month.\n");
+        body.push_str("```");
+        message.send(escape_markdown(body)).await?;
 
-        service_a.len().cmp(&service_b.len())
-    });
-
-    let last_element = service_cost_info_list.last().unwrap();
-    let last_element_service = last_element.get("service").unwrap();
-    let last_element_formatted_amount = last_element.get("formatted_amount").unwrap();
-    let last_element_unit = last_element.get("unit").unwrap();
-
-    let last_service_cost_info_text = String::from(format!(
-        "{last_element_service} ---- {last_element_formatted_amount} {last_element_unit}\n"
-    ));
-
-    let last_service_cost_info_text_length = last_service_cost_info_text.len();
-
-    service_cost_info_list.sort_by(|a, b| {
-        let formatted_amount_a = a.get("formatted_amount").unwrap();
-        let formatted_amount_b = b.get("formatted_amount").unwrap();
-
-        let formatted_amount_a = formatted_amount_a
-            .parse::<f64>()
-            .expect("Error to convert formatted amount to f64");
-        let formatted_amount_b = formatted_amount_b
-            .parse::<f64>()
-            .expect("Error to convert formatted amount to f64");
-
-        formatted_amount_b
-            .partial_cmp(&formatted_amount_a)
-            .expect("Error to compare these two float")
-    });
-
-    for service_cost_info in service_cost_info_list {
-        let service = service_cost_info.get("service").unwrap();
-        let formatted_amount = service_cost_info.get("formatted_amount").unwrap();
-        let unit = service_cost_info.get("unit").unwrap();
-
-        let service_cost_info_text = String::from(format!("{service} {formatted_amount} {unit}\n"));
-
-        let service_cost_info_text_length = service_cost_info_text.len();
-
-        let char_count_difference =
-            last_service_cost_info_text_length - service_cost_info_text_length;
-
-        let line = "-".repeat(char_count_difference);
-
-        let service_cost_info_text =
-            String::from(format!("{service} {line} {formatted_amount} {unit}\n"));
-
-        message.push_str(&service_cost_info_text);
+        return Ok(());
     }
 
-    message.push_str(&format!("\nTotal: {:.2}", total_amount));
+    // Find the service with the longest display text for formatting
+    let mut max_text_length = 0;
+    for cost in &service_costs {
+        let text_length = format!("{} {} {}", cost.service, cost.formatted_amount, cost.unit).len();
+        if text_length > max_text_length {
+            max_text_length = text_length;
+        }
+    }
 
-    message.push_str("```");
+    // Sort by cost (descending)
+    service_costs.sort_by(|a, b| {
+        b.amount
+            .partial_cmp(&a.amount)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    telegram.send(escape_markdown(message)).await?;
+    // Format and add each service cost to the message
+    for cost in service_costs {
+        let service_text = format!("{} {} {}", cost.service, cost.formatted_amount, cost.unit);
+        let padding = max_text_length - service_text.len();
+
+        // Create a line with dashes between the service name and amount
+        let service_line = format!(
+            "{} {} {}\n",
+            cost.service,
+            "-".repeat(padding + 2),
+            format!("{} {}", cost.formatted_amount, cost.unit)
+        );
+
+        body.push_str(&service_line);
+    }
+
+    body.push_str(&format!("\nTotal: {:.2} USD", total_amount));
+    body.push_str("```");
+
+    // Send the message via Telegram
+    message.send(escape_markdown(body)).await?;
 
     Ok(())
 }
 
+/// Lambda handler function
 async fn handler(
     telegram_token: &str,
     chat_id: &str,
     _event: LambdaEvent<Value>,
 ) -> Result<(), Error> {
-    let aws = aws::Aws::new();
-    let telegram = telegram::Telegram::new(telegram_token.to_string(), chat_id.to_string());
+    let aws = aws::BillExplorer::new();
+    let telegram = telegram::Message::new(telegram_token.to_string(), chat_id.to_string());
 
     send_service_costs(&aws, &telegram).await?;
 
     Ok(())
 }
 
+/// Main function - entry point for the Lambda
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let telegram_token: String = std::env::var("TELEGRAM_TOKEN")
-        .map_err(|_| Error::from("TELEGRAM_TOKEN must be set in Lambda environment variables"))?;
+    // Get environment variables
+    let telegram_token: String = std::env::var("TELEGRAM_TOKEN").map_err(|_| {
+        AppError::Environment(
+            "TELEGRAM_TOKEN must be set in Lambda environment variables".to_string(),
+        )
+    })?;
 
-    let chat_id: String = std::env::var("CHAT_ID")
-        .map_err(|_| Error::from("CHAT_ID must be set in Lambda environment variables"))?;
+    let chat_id: String = std::env::var("CHAT_ID").map_err(|_| {
+        AppError::Environment("CHAT_ID must be set in Lambda environment variables".to_string())
+    })?;
 
+    // Run the Lambda handler
     lambda_runtime::run(service_fn(|event: LambdaEvent<Value>| async {
         handler(&telegram_token, &chat_id, event).await
     }))
